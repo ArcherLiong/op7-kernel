@@ -51,6 +51,20 @@ merge() {  # $1 = 相对内核源码根的 config 片段
 }
 
 cmd_configure() {
+  echo "== 0/5 接管版本串生成 =="
+  # scripts/setlocalversion 在检测到 working tree 不干净时会往版本串尾部加 "+"，
+  # CI 里 kernel/ 嵌在外层仓库目录下，必然会命中，结果变成
+  # 4.14.357-openela-perf-g9f007fac27dc+ —— 多了个加号，模块全废。
+  # 版本串本来就由 CONFIG_LOCALVERSION 决定，直接让它闭嘴，彻底去掉 git 变量。
+  if [ -f "$KERNEL/scripts/setlocalversion" ]; then
+    echo "  改动前 git status（仅供诊断）:"
+    git -C "$KERNEL" status --porcelain 2>/dev/null | head -10 || true
+    printf '#!/bin/sh\n# 版本串由 CONFIG_LOCALVERSION 决定，这里不再追加 git 信息\nexit 0\n' \
+      > "$KERNEL/scripts/setlocalversion"
+    chmod +x "$KERNEL/scripts/setlocalversion"
+    echo "  已替换 scripts/setlocalversion -> 恒返回空"
+  fi
+
   echo "== 1/5 生成基础 defconfig (vendor/sm8150-perf) =="
   "${MK[@]}" vendor/sm8150-perf_defconfig
 
