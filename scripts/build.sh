@@ -55,14 +55,29 @@ cmd_configure() {
   # scripts/setlocalversion 在检测到 working tree 不干净时会往版本串尾部加 "+"，
   # CI 里 kernel/ 嵌在外层仓库目录下，必然会命中，结果变成
   # 4.14.357-openela-perf-g9f007fac27dc+ —— 多了个加号，模块全废。
-  # 版本串本来就由 CONFIG_LOCALVERSION 决定，直接让它闭嘴，彻底去掉 git 变量。
+  # 但它同时负责打印 CONFIG_LOCALVERSION，不能整段删掉，
+  # 所以换成「只输出 CONFIG_LOCALVERSION、不碰 git」的等价实现。
   if [ -f "$KERNEL/scripts/setlocalversion" ]; then
     echo "  改动前 git status（仅供诊断）:"
     git -C "$KERNEL" status --porcelain 2>/dev/null | head -10 || true
-    printf '#!/bin/sh\n# 版本串由 CONFIG_LOCALVERSION 决定，这里不再追加 git 信息\nexit 0\n' \
-      > "$KERNEL/scripts/setlocalversion"
+    cat > "$KERNEL/scripts/setlocalversion" <<'SETLOCAL'
+#!/bin/sh
+# 版本串只认 CONFIG_LOCALVERSION，完全不看 git 状态（避免 -dirty 追加 "+"）
+for f in include/config/auto.conf \
+         "$(dirname "$0")/../include/config/auto.conf" \
+         .config \
+         "$(dirname "$0")/../.config"; do
+	[ -f "$f" ] || continue
+	v=$(sed -n 's/^CONFIG_LOCALVERSION="\(.*\)"$/\1/p' "$f" | head -n 1)
+	if [ -n "$v" ]; then
+		printf '%s' "$v"
+		break
+	fi
+done
+exit 0
+SETLOCAL
     chmod +x "$KERNEL/scripts/setlocalversion"
-    echo "  已替换 scripts/setlocalversion -> 恒返回空"
+    echo "  已替换 scripts/setlocalversion -> 只输出 CONFIG_LOCALVERSION"
   fi
 
   echo "== 1/5 生成基础 defconfig (vendor/sm8150-perf) =="
@@ -128,6 +143,18 @@ cmd_verify() {
   fi
   if [ -n "$auto" ]; then
     echo "  !! LOCALVERSION_AUTO 仍为 y，版本串可能被 git 状态污染"
+    miss=1
+  fi
+
+  # 真正会被写进内核的是 `make kernelrelease` 的结果，这里提前算一次，
+  # 免得白等 5 分钟编译才发现 setlocalversion 没吐出版本串。
+  echo "-- make kernelrelease 预演 --"
+  local kr
+  kr=$("${MK[@]}" -s kernelrelease 2>/dev/null | tail -n 1 | tr -d '\r')
+  echo "  kernelrelease : ${kr:-<空>}"
+  echo "  期望          : $EXPECT_RELEASE"
+  if [ "$kr" != "$EXPECT_RELEASE" ]; then
+    echo "  !! kernelrelease 与期望不符，编译前就拦下"
     miss=1
   fi
 
