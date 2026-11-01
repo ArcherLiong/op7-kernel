@@ -1,0 +1,8 @@
+out/
+kernel/
+toolchain/
+work/
+*.img
+*.apk
+magiskboot
+.lto-off.fragment

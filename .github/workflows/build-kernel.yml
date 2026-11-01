@@ -1,0 +1,196 @@
+name: build-docker-kernel
+
+# 触发方式
+#   1) 推代码到 main 时自动跑
+#   2) 仓库页面 -> Actions -> build-docker-kernel -> Run workflow（可改参数）
+on:
+  workflow_dispatch:
+    inputs:
+      lto:
+        description: "保持官方 LTO（1=是，推荐；0=关闭，编译快一倍但内核对不上官方 codegen）"
+        required: false
+        default: "1"
+      kernel_commit:
+        description: "内核提交（默认就是官方构建用的那个，别乱改）"
+        required: false
+        default: "9f007fac27dce21d29d8230753b71d5634b8a00e"
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_oneplus_sm8150.git
+  KERNEL_BRANCH: lineage-24.0
+  KERNEL_COMMIT: ${{ github.event.inputs.kernel_commit || '9f007fac27dce21d29d8230753b71d5634b8a00e' }}
+  CLANG_VER: clang-r596125
+  CLANG_URL: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+  GCC64_URL: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9
+  GCC32_URL: https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9
+  MAGISK_URL: https://github.com/topjohnwu/Magisk/releases/download/v31.1/Magisk-v31.1.apk
+  BOOT_URL: https://mirrorbits.lineageos.org/full/guacamoleb/20261101/boot.img
+  BOOT_SHA256: b076fd18bd6282b0f60ef27747a151a3926e39197a7a2abb001aa6181d023f3a
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 300
+    steps:
+      - name: 取本仓库
+        uses: actions/checkout@v4
+
+      - name: 释放磁盘空间
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          [ -n "${AGENT_TOOLSDIRECTORY:-}" ] && sudo rm -rf "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          df -h /
+
+      - name: 安装编译依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc bison build-essential ccache cpio curl flex git kmod \
+            libelf-dev libssl-dev libncurses-dev lz4 python3 rsync \
+            unzip zip device-tree-compiler zstd
+          df -h /
+
+      # ---------------------------------------------------------------------
+      # 工具链 1/2: clang。官方内核的 version banner 里写死了
+      # "clang version 22.0.2, based on r596125"，所以优先用它；
+      # 万一上游把该目录归档了，就退到列表里次新的，并在日志里大声提示。
+      # ---------------------------------------------------------------------
+      - name: 准备工具链 · clang
+        run: |
+          set -e
+          mkdir -p toolchain
+          git clone --depth 1 --filter=blob:none --no-checkout "$CLANG_URL" toolchain/clang
+          cd toolchain/clang
+          git ls-tree --name-only HEAD | grep '^clang-r' | sort -V > /tmp/clang-list.txt
+          echo "可用 clang 目录共 $(wc -l < /tmp/clang-list.txt) 个，最新 5 个："
+          tail -5 /tmp/clang-list.txt
+
+          pick=""
+          for c in "$CLANG_VER" clang-r590651 clang-r584079 clang-r574358 clang-r560880 clang-r547379 clang-r536225 clang-r522817; do
+            if grep -qx "$c" /tmp/clang-list.txt; then pick="$c"; break; fi
+          done
+          if [ -z "$pick" ]; then
+            pick=$(tail -1 /tmp/clang-list.txt)
+            echo "::warning::没找到 $CLANG_VER，退到最新的 $pick —— 可能与官方 codegen 不同"
+          fi
+          echo "选用: $pick"
+          echo "CLANG_VER=$pick" >> "$GITHUB_ENV"
+
+          git sparse-checkout init --cone
+          git sparse-checkout set "$pick"
+          git checkout -f HEAD
+          test -x "$pick/bin/clang" || { echo "::error::sparse checkout 后没有 $pick/bin/clang"; exit 1; }
+          "./$pick/bin/clang" --version
+          du -sh .
+
+      - name: 准备工具链 · aarch64 / arm 交叉 binutils
+        run: |
+          git clone --depth 1 "$GCC64_URL" toolchain/gcc64
+          git clone --depth 1 "$GCC32_URL" toolchain/gcc32
+          chmod -R +x toolchain/gcc64/bin toolchain/gcc32/bin || true
+          toolchain/gcc64/bin/aarch64-linux-android-gcc --version | head -1
+          toolchain/gcc32/bin/arm-linux-androideabi-gcc --version | head -1
+          # 内核在 LLVM_IAS != 1 时会调用 $(CROSS_COMPILE)elfedit 来定位工具链
+          ls toolchain/gcc64/bin/aarch64-linux-android-elfedit
+          df -h /
+
+      - name: 拉取内核源码
+        run: |
+          set -e
+          # 浅克隆即可：版本串不依赖 git describe，由配置写死
+          git clone --depth 1 --branch "$KERNEL_BRANCH" "$KERNEL_REPO" kernel
+          cd kernel
+          got=$(git rev-parse HEAD)
+          echo "HEAD   : $got"
+          echo "期望   : $KERNEL_COMMIT"
+          if [ "$got" != "$KERNEL_COMMIT" ]; then
+            echo "分支头已经变了，按指定提交重新检出"
+            git fetch --depth 1 origin "$KERNEL_COMMIT"
+            git checkout -f "$KERNEL_COMMIT"
+            git rev-parse HEAD
+          fi
+          du -sh .
+
+      - name: 拉取官方 boot.img（只作重打包模板）
+        run: |
+          curl -L --retry 5 --retry-delay 5 --max-time 900 -o boot-orig.img "$BOOT_URL"
+          echo "$BOOT_SHA256  boot-orig.img" | sha256sum -c -
+          ls -l boot-orig.img
+
+      - name: 配置内核
+        env:
+          LTO: ${{ github.event.inputs.lto || '1' }}
+        run: bash scripts/build.sh configure
+
+      - name: 校验配置
+        run: bash scripts/build.sh verify
+
+      - name: 编译内核
+        env:
+          LTO: ${{ github.event.inputs.lto || '1' }}
+        run: bash scripts/build.sh build
+
+      - name: 准备 magiskboot
+        run: |
+          curl -L --retry 3 --max-time 300 -o magisk.apk "$MAGISK_URL"
+          unzip -o -j magisk.apk "lib/x86_64/libmagiskboot.so" -d .
+          mv -f libmagiskboot.so magiskboot
+          chmod +x magiskboot
+          mkdir -p "$HOME/.local/bin"
+          cp magiskboot "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          ./magiskboot 2>&1 | head -5 || true
+
+      - name: 重打包 boot.img
+        run: bash scripts/build.sh repack
+
+      - name: 失败也保留日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            kernel.config
+            out/include/generated/utsrelease.h
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 汇总
+        run: |
+          {
+            echo "## 内核编译完成"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 内核提交 | \`$KERNEL_COMMIT\` |"
+            echo "| 工具链 | $CLANG_VER / LLVM |"
+            echo "| LTO | ${{ github.event.inputs.lto || '1' }} |"
+            echo "| utsrelease | \`$(grep -o '\"[^\"]*\"' out/include/generated/utsrelease.h | tr -d '\"')\` |"
+            echo "| 大小 | $(stat -c%s boot-docker.img) 字节 |"
+            echo "| sha256 | \`$(cut -d' ' -f1 boot-docker.sha256)\` |"
+            echo ""
+            echo "下载 artifact \`boot-docker-guacamoleb\`，然后用 fb.py 刷入："
+            echo ""
+            echo '```'
+            echo "python fb.py flash boot boot-docker.img"
+            echo "python fb.py reboot"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-docker-guacamoleb
+          path: |
+            boot-docker.img
+            boot-docker.sha256
+            kernel.config
+          if-no-files-found: error
+          retention-days: 30

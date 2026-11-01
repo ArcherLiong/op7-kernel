@@ -1,0 +1,81 @@
+# ============================================================================
+# 容器 / Docker 能力补充配置
+# 设备: OnePlus 7 (GM1900, guacamoleb, sm8150)
+# 基线: LineageOS android_kernel_oneplus_sm8150 @ lineage-24.0
+#       提交 9f007fac27dce21d29d8230753b71d5634b8a00e
+# 用法: 由 scripts/build.sh 用 merge_config.sh 合并进 .config
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 版本串 —— 全文件最要紧的一段，改动前想清楚
+# ---------------------------------------------------------------------------
+# 官方构建的内核版本串是:
+#     4.14.357-openela-perf-g9f007fac27dc
+# 组成 = Makefile(VERSION.PATCHLEVEL.SUBLEVEL) + EXTRAVERSION(-openela)
+#        + CONFIG_LOCALVERSION(-perf) + LOCALVERSION_AUTO 生成的 -g<sha>
+#
+# vendor 分区里的 .ko（WiFi、音频、触控、相机全是模块）在 insmod 时会比对
+# vermagic，其中就包含这个串。少一个字都加载不上。
+#
+# 这里把 git 自动生成的后缀直接写死，而不是依赖 LOCALVERSION_AUTO：
+#   - 不依赖 git describe，浅克隆也能编译（省时间省磁盘）
+#   - 不受 -dirty 干扰，构建目录有残留文件也不会污染版本号（不会变成 -dirty）
+CONFIG_LOCALVERSION="-perf-g9f007fac27dc"
+# CONFIG_LOCALVERSION_AUTO is not set
+
+# 保留官方配置，否则 genksyms 算出来的符号 CRC 会和 vendor 模块不一致
+CONFIG_MODVERSIONS=y
+
+# ---------------------------------------------------------------------------
+# 命名空间 —— 容器隔离的地基。缺 PID_NS 则 runc 在 clone() 直接返回 EINVAL
+# ---------------------------------------------------------------------------
+CONFIG_NAMESPACES=y
+CONFIG_UTS_NS=y
+CONFIG_IPC_NS=y
+CONFIG_PID_NS=y
+CONFIG_NET_NS=y
+# USER_NS 会放宽 Android 应用沙箱边界，官方默认关闭。
+# dockerd 以 root 跑不需要它；要 rootless docker / podman 才需要。保留。
+CONFIG_USER_NS=y
+
+# ---- System V IPC（IPC_NS 之外，postgres / 部分 Java 应用也依赖）----
+CONFIG_SYSVIPC=y
+CONFIG_SYSVIPC_SYSCTL=y
+CONFIG_POSIX_MQUEUE=y
+
+# ---- cgroup 控制器 ----
+CONFIG_CGROUPS=y
+CONFIG_CGROUP_SCHED=y
+CONFIG_MEMCG=y
+CONFIG_CGROUP_PIDS=y
+CONFIG_CGROUP_DEVICE=y
+CONFIG_CGROUP_FREEZER=y
+CONFIG_CGROUP_CPUACCT=y
+CONFIG_BLK_CGROUP=y
+# CFS_BANDWIDTH 是 --cpus / compose 里 cpus: 限额的实现基础
+CONFIG_CFS_BANDWIDTH=y
+
+# ---- 存储驱动 ----
+CONFIG_OVERLAY_FS=y
+CONFIG_EXT4_FS=y
+CONFIG_BLK_DEV_LOOP=y
+CONFIG_TMPFS=y
+CONFIG_TMPFS_POSIX_ACL=y
+
+# ---- 容器网络 ----
+CONFIG_VETH=y
+CONFIG_BRIDGE=y
+CONFIG_BRIDGE_NETFILTER=y
+CONFIG_NETFILTER=y
+CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+CONFIG_IP_NF_IPTABLES=y
+CONFIG_IP_NF_NAT=y
+CONFIG_IP_NF_TARGET_MASQUERADE=y
+CONFIG_MACVLAN=y
+CONFIG_VXLAN=y
+
+# ---- 运行时依赖 ----
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+CONFIG_KEYS=y
