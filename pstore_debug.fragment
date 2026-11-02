@@ -13,3 +13,12 @@ CONFIG_PSTORE_RAM=y
 CONFIG_PSTORE_CONSOLE=y
 CONFIG_PSTORE_PMSG=y
 CONFIG_PSTORE_FTRACE=y
+
+# panic 之后 10 秒自动复位。
+#
+# 为什么必须加：官方配置是 CONFIG_PANIC_TIMEOUT=-1，panic 后内核原地挂死，
+# 手机变成一块砖，只能人肉长按电源键 20 秒才能拉回来 —— 而长按是 PMIC 硬复位，
+# 有把 DDR 里 ramoops 那块内容一起清掉的风险，恰好会把我们要抓的日志毁掉。
+# 改成 10 秒后由内核自己 soft reboot，是热复位，ramoops 保留得更可靠，
+# 而且崩溃后手机会自己回到系统，不用人在旁边守着按电源键。
+CONFIG_PANIC_TIMEOUT=10

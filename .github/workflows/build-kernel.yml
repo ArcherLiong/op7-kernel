@@ -18,6 +18,14 @@ on:
         description: "1=额外开启 PSTORE（崩溃日志捕获，本机 ramoops 保留内存可用）；0=不开"
         required: false
         default: "0"
+      ias:
+        description: "1=用 clang 集成汇编器(LLVM_IAS=1)；0=用交叉 GNU as 4.9。4.14 内核看不出这项差异，是唯一未排除的编译环节"
+        required: false
+        default: "0"
+      crashdump:
+        description: "1=开启 MINIDUMP+RTB，把 panic 现场落进 rawdump 分区（崩溃排查用）；0=不开"
+        required: false
+        default: "0"
       kernel_commit:
         description: "内核提交（默认就是官方构建用的那个，别乱改）"
         required: false
@@ -39,6 +47,8 @@ env:
   MAGISK_URL: https://github.com/topjohnwu/Magisk/releases/download/v31.1/Magisk-v31.1.apk
   BOOT_URL: https://mirrorbits.lineageos.org/full/guacamoleb/20261101/boot.img
   BOOT_SHA256: b076fd18bd6282b0f60ef27747a151a3926e39197a7a2abb001aa6181d023f3a
+  IAS: ${{ github.event.inputs.ias || '0' }}
+  CRASHDUMP: ${{ github.event.inputs.crashdump || '0' }}
 
 jobs:
   build:
@@ -137,6 +147,8 @@ jobs:
           LTO: ${{ github.event.inputs.lto || '1' }}
           VANILLA: ${{ github.event.inputs.vanilla || '0' }}
           PSTORE: ${{ github.event.inputs.pstore || '0' }}
+          IAS: ${{ github.event.inputs.ias || '0' }}
+          CRASHDUMP: ${{ github.event.inputs.crashdump || '0' }}
         run: bash scripts/build.sh configure
 
       - name: 校验配置
@@ -201,7 +213,7 @@ jobs:
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: boot-docker-guacamoleb
+          name: boot-i${{ github.event.inputs.ias || '0' }}-c${{ github.event.inputs.crashdump || '0' }}-v${{ github.event.inputs.vanilla || '0' }}
           path: |
             boot-docker.img
             boot-docker.sha256

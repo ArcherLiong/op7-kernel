@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# 崩溃现场落盘配置（诊断用）
+#
+# 背景：官方内核配置里
+#   CONFIG_QCOM_FORCE_WDOG_BITE_ON_PANIC=y   panic 后强制看门狗咬 -> 硬复位 -> EDL
+#   CONFIG_PANIC_TIMEOUT=-1                  不软重启
+#   # CONFIG_QCOM_MINIDUMP is not set        minidump 关闭
+#   # CONFIG_PSTORE is not set               pstore 关闭
+# 结果是崩溃后既没有软重启（pstore 读不出），也没有 minidump 落盘，
+# 分区表里的 rawdump(128MB) 永远是空的 —— 日志彻底拿不到。
+#
+# Qualcomm 的标准崩溃链路是：
+#   panic -> minidump 把现场收进保留内存 -> watchdog bite -> 复位
+#         -> SBL 把保留内存写进 rawdump 分区 -> bootloader 清标志
+# 所以只要打开 MINIDUMP，重启进 Android 后用 root 读 rawdump 就能拿到现场。
+#
+# 同时打开 RTB（register trace buffer），它会记录最后执行过的代码地址，
+# 万一 minidump 里没有 dmesg，靠 PC/LR 也能反查崩在哪个函数。
+# ---------------------------------------------------------------------------
+
+CONFIG_QCOM_MINIDUMP=y
+CONFIG_QCOM_RTB=y
+
+# pstore 保留着，双保险：如果这次内核能活到 panic 之后软复位，ramoops 也有货。
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+
+# 让 panic 停在现场更久一点，给 minidump 收集留时间（看门狗仍会咬，不影响落盘）。
+CONFIG_PANIC_TIMEOUT=30

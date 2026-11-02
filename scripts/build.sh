@@ -46,6 +46,17 @@ MK=(
   "GCC_TOOLCHAIN_DIR=$GCC64/bin/"
 )
 
+# 4.14 内核没有 CONFIG_AS_IS_LLVM 这个选项，所以「用的是 clang 集成汇编器还是
+# GNU as 4.9」在 .config 里完全看不出来 —— 配置逐条对比也发现不了。
+# 官方 AOSP clang 的构建通常走 IAS，而 LLVM=1 单独并不会启用它（需显式 LLVM_IAS=1）。
+# 两条路编出来的汇编代码可以不同，属于此前唯一未排除的编译环节。
+if [ "${IAS:-0}" = "1" ]; then
+  MK+=(LLVM_IAS=1)
+  echo ">> 使用 clang 集成汇编器 (LLVM_IAS=1)"
+else
+  echo ">> 汇编器：交叉 GNU as（未启用 LLVM_IAS）"
+fi
+
 merge() {  # $1 = 相对内核源码根的 config 片段
   "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$KERNEL/$1"
 }
@@ -109,6 +120,17 @@ VF
     echo "   PSTORE 已开启（捕获崩溃日志用）"
   else
     echo "   PSTORE 未开启"
+  fi
+
+  echo "== 3.6/5 可选: 崩溃现场落盘 (MINIDUMP + RTB) =="
+  if [ "${CRASHDUMP:-0}" = "1" ]; then
+    # 官方配置里 FORCE_WDOG_BITE_ON_PANIC=y 会让 panic 直接硬复位进 EDL，
+    # 但 MINIDUMP 关着 -> rawdump 分区永远为空，日志拿不到。
+    # 打开 MINIDUMP 后，panic 现场会经保留内存落到 rawdump，重启后可读。
+    "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$ROOT/crashdump.fragment"
+    echo "   MINIDUMP + RTB 已开启（崩溃现场落盘）"
+  else
+    echo "   MINIDUMP 未开启"
   fi
 
   echo "== 4/5 可选: 关闭 LTO =="
