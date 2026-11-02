@@ -10,6 +10,10 @@ on:
         description: "保持官方 LTO（1=是，推荐；0=关闭，编译快一倍但内核对不上官方 codegen）"
         required: false
         default: "1"
+      vanilla:
+        description: "1=不叠加容器选项，配置与官方逐条一致（对照组，排查启动失败用）；0=正常容器内核"
+        required: false
+        default: "0"
       kernel_commit:
         description: "内核提交（默认就是官方构建用的那个，别乱改）"
         required: false
@@ -127,9 +131,12 @@ jobs:
       - name: 配置内核
         env:
           LTO: ${{ github.event.inputs.lto || '1' }}
+          VANILLA: ${{ github.event.inputs.vanilla || '0' }}
         run: bash scripts/build.sh configure
 
       - name: 校验配置
+        env:
+          VANILLA: ${{ github.event.inputs.vanilla || '0' }}
         run: bash scripts/build.sh verify
 
       - name: 编译内核

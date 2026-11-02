@@ -88,7 +88,17 @@ SETLOCAL
   merge arch/arm64/configs/vendor/oplus_non_dynamic.config
 
   echo "== 3/5 叠加容器能力补丁 =="
-  "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$FRAGMENT"
+  if [ "${VANILLA:-0}" = "1" ]; then
+    echo "   VANILLA=1：不叠加容器选项，只保留版本串修正（对照组）"
+    cat > "$ROOT/.vanilla.fragment" <<'VF'
+CONFIG_LOCALVERSION="-perf-g9f007fac27dc"
+# CONFIG_LOCALVERSION_AUTO is not set
+CONFIG_MODVERSIONS=y
+VF
+    "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$ROOT/.vanilla.fragment"
+  else
+    "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$FRAGMENT"
+  fi
 
   echo "== 4/5 可选: 关闭 LTO =="
   if [ "${LTO:-1}" = "0" ]; then
@@ -114,6 +124,9 @@ SETLOCAL
 cmd_verify() {
   echo "== 校验容器必需项 =="
   local miss=0
+  if [ "${VANILLA:-0}" = "1" ]; then
+    echo "  VANILLA=1：对照组不检查容器选项，只验证编译链路与版本串"
+  else
   for c in PID_NS USER_NS IPC_NS SYSVIPC CGROUP_PIDS CGROUP_DEVICE \
            POSIX_MQUEUE OVERLAY_FS VETH BRIDGE IP_NF_NAT SECCOMP; do
     if grep -qx "CONFIG_${c}=y" "$OUT/.config"; then
@@ -130,6 +143,7 @@ cmd_verify() {
       echo "  --   CONFIG_$c（可选，未启用）"
     fi
   done
+  fi
 
   echo "-- 版本串 --"
   local lv auto
