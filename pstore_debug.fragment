@@ -1,0 +1,15 @@
+# 崩溃日志捕获片段（诊断用，不改变任何启动行为）
+#
+# 依据：本机 dtb 的 /reserved-memory/ramoops@0xA9800000 节点真实存在，
+#       带 record-size / console-size / pmsg-size / ecc-size 等属性，
+#       只要内核开了 PSTORE_RAM 就会自动绑定，无需在 cmdline 里手工指定地址。
+#
+# 官方内核为什么读不到：官方 .config 里是 "# CONFIG_PSTORE is not set"，
+# 所以之前那个自编内核无论怎么崩，都不会在 ramoops 里留下任何东西 ——
+# 这也是我们一直只能靠猜的根本原因。
+
+CONFIG_PSTORE=y
+CONFIG_PSTORE_RAM=y
+CONFIG_PSTORE_CONSOLE=y
+CONFIG_PSTORE_PMSG=y
+CONFIG_PSTORE_FTRACE=y

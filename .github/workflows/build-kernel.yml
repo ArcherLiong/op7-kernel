@@ -14,6 +14,10 @@ on:
         description: "1=不叠加容器选项，配置与官方逐条一致（对照组，排查启动失败用）；0=正常容器内核"
         required: false
         default: "0"
+      pstore:
+        description: "1=额外开启 PSTORE（崩溃日志捕获，本机 ramoops 保留内存可用）；0=不开"
+        required: false
+        default: "0"
       kernel_commit:
         description: "内核提交（默认就是官方构建用的那个，别乱改）"
         required: false
@@ -132,6 +136,7 @@ jobs:
         env:
           LTO: ${{ github.event.inputs.lto || '1' }}
           VANILLA: ${{ github.event.inputs.vanilla || '0' }}
+          PSTORE: ${{ github.event.inputs.pstore || '0' }}
         run: bash scripts/build.sh configure
 
       - name: 校验配置
@@ -179,6 +184,8 @@ jobs:
             echo "| 内核提交 | \`$KERNEL_COMMIT\` |"
             echo "| 工具链 | $CLANG_VER / LLVM |"
             echo "| LTO | ${{ github.event.inputs.lto || '1' }} |"
+            echo "| vanilla | ${{ github.event.inputs.vanilla || '0' }} |"
+            echo "| PSTORE | ${{ github.event.inputs.pstore || '0' }} |"
             echo "| utsrelease | \`$(grep -o '\"[^\"]*\"' out/include/generated/utsrelease.h | tr -d '\"')\` |"
             echo "| 大小 | $(stat -c%s boot-docker.img) 字节 |"
             echo "| sha256 | \`$(cut -d' ' -f1 boot-docker.sha256)\` |"

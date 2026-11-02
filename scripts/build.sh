@@ -100,6 +100,17 @@ VF
     "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$FRAGMENT"
   fi
 
+  echo "== 3.5/5 可选: 开启崩溃日志捕获 (PSTORE) =="
+  if [ "${PSTORE:-0}" = "1" ]; then
+    # 本机 dtb 里有 ramoops@0xA9800000 保留内存，开了 PSTORE_RAM 就能自动绑定。
+    # 官方内核把这个功能关着，所以之前内核崩了也留不下任何痕迹 —— 这次补上，
+    # 下次崩了重启后直接读 /sys/fs/pstore/console-ramoops 就能看到 panic 现场。
+    "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$ROOT/pstore_debug.fragment"
+    echo "   PSTORE 已开启（捕获崩溃日志用）"
+  else
+    echo "   PSTORE 未开启"
+  fi
+
   echo "== 4/5 可选: 关闭 LTO =="
   if [ "${LTO:-1}" = "0" ]; then
     printf '# CONFIG_LTO_CLANG is not set\nCONFIG_LTO_NONE=y\n' > "$ROOT/.lto-off.fragment"
