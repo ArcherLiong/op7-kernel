@@ -63,6 +63,15 @@ else
   echo ">> 汇编器：交叉 GNU as（未启用 LLVM_IAS）"
 fi
 
+# 实测结论（vanilla-diag2）：--target=aarch64-linux-gnu 生效了（prologue 变了），
+# 但金丝雀仍走 TLS —— 换三元组不会改变 guard 取法，需要显式
+# -fstack-protector-guard=global 才能让金丝雀落到 __stack_chk_guard。
+# 通过 KCFLAGS 注入（4.14 顶层 Makefile 有 KBUILD_CFLAGS += $(KCFLAGS)）。
+if [ "${SSPGUARD:-0}" = "1" ]; then
+  MK+=("KCFLAGS=-fstack-protector-guard=global")
+  echo ">> KCFLAGS 注入 -fstack-protector-guard=global"
+fi
+
 merge() {  # $1 = 相对内核源码根的 config 片段
   "$KERNEL/scripts/kconfig/merge_config.sh" -m -O "$OUT" "$OUT/.config" "$KERNEL/$1"
 }
@@ -219,11 +228,27 @@ cmd_verify() {
 }
 
 cmd_build() {
+  echo "== SSP 金丝雀实验矩阵（同款 clang 编译样例，反汇编看 guard 取法）=="
+  cat > /tmp/ssp_test.c <<'EOF'
+extern void use(void *p);
+void probe(char *in) { char buf[64]; __builtin_memcpy(buf, in, 64); use(buf); use(in); }
+EOF
+  for t in "aarch64-linux-android" "aarch64-linux-gnu" \
+           "aarch64-linux-gnu -fstack-protector-guard=global" \
+           "aarch64-linux-gnu -fstack-protector-guard=global -fstack-protector-guard-reg=tpidr_el0"; do
+    if clang --target=$t -c -O2 -fstack-protector-strong /tmp/ssp_test.c -o /tmp/ssp_test.o 2>/tmp/ssp_err.txt; then
+      n_mrs=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'tpidr_el0')
+      n_adrp=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'adrp')
+      echo "  [target=$t] tpidr 指令=$n_mrs adrp 指令=$n_adrp"
+    else
+      echo "  [target=$t] 编译失败: $(head -2 /tmp/ssp_err.txt | tr '\n' ' ')"
+    fi
+  done
+  echo "== 实验结束 =="
   echo "== 编译命令行诊断（dry-run 抽样，验证 CC/--target 是否真的生效）=="
   # make -n 不执行只打印；抽 head.o 的编译行，里面应该能看到
   #   CC=clang --target=aarch64-linux-gnu  是否真正出现在 clang 命令里
-  "${MK[@]}" -n arch/arm64/kernel/assembly.o 2>/dev/null | grep -m1 -E 'clang|gcc' || true
-  "${MK[@]}" -n arch/arm64/kernel/setup.o 2>/dev/null | grep -m1 -E 'clang|gcc' || true
+  "${MK[@]}" -n arch/arm64/kernel/setup.o 2>/dev/null | grep -m2 -E "echo '  CC |clang " || true
   echo "== 诊断结束 =="
   echo "== 开始编译 Image（$(nproc) 核，$(free -g | awk '/Mem:/{print $2}')GB 内存）=="
   date +"开始 %H:%M:%S"

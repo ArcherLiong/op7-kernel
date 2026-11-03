@@ -10,6 +10,10 @@ on:
         description: "保持官方 LTO（1=是，推荐；0=关闭，编译快一倍但内核对不上官方 codegen）"
         required: false
         default: "1"
+      sspguard:
+        description: "1=注入 -fstack-protector-guard=global（金丝雀走全局变量，对齐官方）；0=不开"
+        required: false
+        default: "0"
       vanilla:
         description: "1=不叠加容器选项，配置与官方逐条一致（对照组，排查启动失败用）；0=正常容器内核"
         required: false
@@ -190,6 +194,7 @@ jobs:
       - name: 编译内核
         env:
           LTO: ${{ github.event.inputs.lto || '1' }}
+          SSPGUARD: ${{ github.event.inputs.sspguard || '1' }}
           KBUILD_BUILD_TIMESTAMP: ${{ github.event.inputs.build_timestamp || 'Sun Nov  1 02:33:07 UTC 2026' }}
           KBUILD_BUILD_USER: root
           KBUILD_BUILD_HOST: 0ef44fd3c1b1
@@ -247,7 +252,7 @@ jobs:
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: boot-i${{ github.event.inputs.ias || '0' }}-c${{ github.event.inputs.crashdump || '0' }}-v${{ github.event.inputs.vanilla || '0' }}
+          name: boot-i${{ github.event.inputs.ias || '0' }}-c${{ github.event.inputs.crashdump || '0' }}-v${{ github.event.inputs.vanilla || '0' }}-s${{ github.event.inputs.sspguard || '1' }}
           path: |
             boot-docker.img
             boot-docker.sha256
