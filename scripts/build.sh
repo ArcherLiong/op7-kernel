@@ -229,19 +229,20 @@ cmd_verify() {
 
 cmd_build() {
   echo "== SSP 金丝雀实验矩阵（同款 clang 编译样例，反汇编看 guard 取法）=="
+  # 注意：本脚本 set -euo pipefail，grep -c 零匹配时退出码 1 会杀掉脚本，
+  # 所有统计都必须 || true 兜底。
   cat > /tmp/ssp_test.c <<'EOF'
 extern void use(void *p);
 void probe(char *in) { char buf[64]; __builtin_memcpy(buf, in, 64); use(buf); use(in); }
 EOF
   for t in "aarch64-linux-android" "aarch64-linux-gnu" \
-           "aarch64-linux-gnu -fstack-protector-guard=global" \
-           "aarch64-linux-gnu -fstack-protector-guard=global -fstack-protector-guard-reg=tpidr_el0"; do
+           "aarch64-linux-gnu -fstack-protector-guard=global"; do
     if clang --target=$t -c -O2 -fstack-protector-strong /tmp/ssp_test.c -o /tmp/ssp_test.o 2>/tmp/ssp_err.txt; then
-      n_mrs=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'tpidr_el0')
-      n_adrp=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'adrp')
-      echo "  [target=$t] tpidr 指令=$n_mrs adrp 指令=$n_adrp"
+      n_mrs=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'tpidr_el0' || true)
+      n_adrp=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'adrp' || true)
+      echo "  [target=$t] tpidr 指令=${n_mrs:-0} adrp 指令=${n_adrp:-0}"
     else
-      echo "  [target=$t] 编译失败: $(head -2 /tmp/ssp_err.txt | tr '\n' ' ')"
+      echo "  [target=$t] 编译失败: $(head -2 /tmp/ssp_err.txt 2>/dev/null | tr '\n' ' ' || true)"
     fi
   done
   echo "== 实验结束 =="
