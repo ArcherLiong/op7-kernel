@@ -68,8 +68,8 @@ fi
 # -fstack-protector-guard=global 才能让金丝雀落到 __stack_chk_guard。
 # 通过 KCFLAGS 注入（4.14 顶层 Makefile 有 KBUILD_CFLAGS += $(KCFLAGS)）。
 if [ "${SSPGUARD:-0}" = "1" ]; then
-  MK+=("KCFLAGS=-fstack-protector-guard=global")
-  echo ">> KCFLAGS 注入 -fstack-protector-guard=global"
+  MK+=("KCFLAGS=-mstack-protector-guard=global")
+  echo ">> KCFLAGS 注入 -mstack-protector-guard=global"
 fi
 
 merge() {  # $1 = 相对内核源码根的 config 片段
@@ -235,12 +235,15 @@ cmd_build() {
 extern void use(void *p);
 void probe(char *in) { char buf[64]; __builtin_memcpy(buf, in, 64); use(buf); use(in); }
 EOF
-  for t in "aarch64-linux-android" "aarch64-linux-gnu" \
-           "aarch64-linux-gnu -fstack-protector-guard=global"; do
+  for t in "aarch64-linux-android" \
+           "aarch64-linux-gnu" \
+           "aarch64-linux-gnu -mstack-protector-guard=global" \
+           "aarch64-linux-gnu -mstack-protector-guard=tls"; do
     if clang --target=$t -c -O2 -fstack-protector-strong /tmp/ssp_test.c -o /tmp/ssp_test.o 2>/tmp/ssp_err.txt; then
-      n_mrs=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'tpidr_el0' || true)
-      n_adrp=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'adrp' || true)
-      echo "  [target=$t] tpidr 指令=${n_mrs:-0} adrp 指令=${n_adrp:-0}"
+      n_mrs=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -ci 'tpidr' || true)
+      n_fail=$(llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -c 'stack_chk_fail' || true)
+      echo "  [target=$t] tpidr=${n_mrs:-0} stack_chk_fail调用=${n_fail:-0}"
+      llvm-objdump -d /tmp/ssp_test.o 2>/dev/null | grep -iE 'mrs|adrp.*stack_chk|bl.*stack_chk' | head -4 || true
     else
       echo "  [target=$t] 编译失败: $(head -2 /tmp/ssp_err.txt 2>/dev/null | tr '\n' ' ' || true)"
     fi
