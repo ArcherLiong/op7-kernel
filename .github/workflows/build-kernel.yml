@@ -190,6 +190,9 @@ jobs:
       - name: 编译内核
         env:
           LTO: ${{ github.event.inputs.lto || '1' }}
+          KBUILD_BUILD_TIMESTAMP: ${{ github.event.inputs.build_timestamp || 'Sun Nov  1 02:33:07 UTC 2026' }}
+          KBUILD_BUILD_USER: root
+          KBUILD_BUILD_HOST: 0ef44fd3c1b1
         run: bash scripts/build.sh build
 
       - name: 准备 magiskboot
