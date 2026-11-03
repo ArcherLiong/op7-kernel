@@ -40,6 +40,12 @@ MK=(
   make -C "$KERNEL" "O=$OUT"
   ARCH=arm64
   LLVM=1
+  # 关键：LLVM=1 时 Makefile 只写 CC=clang，不传 --target，
+  # Android 预编译 clang 默认 aarch64-linux-android —— 栈保护金丝雀会取
+  # TLS(tpidr_el0+0x28)，内核态读它直接 EL1 翻译异常 → 无输出早期 panic。
+  # 官方 LineageOS 构建 CC="clang --target=aarch64-linux-gnu"，guard 取全局
+  # __stack_chk_guard。命令行变量覆盖 Makefile 内的 CC= 赋值。
+  "CC=clang --target=${CLANG_TARGET:-aarch64-linux-gnu}"
   "CROSS_COMPILE=$GCC64/bin/aarch64-linux-android-"
   "CROSS_COMPILE_ARM32=$GCC32/bin/arm-linux-androideabi-"
   # 交叉 as/objcopy 的查找前缀，显式给死，避免 which elfedit 在 CI 上找不到
