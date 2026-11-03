@@ -26,6 +26,10 @@ on:
         description: "1=开启 MINIDUMP+RTB，把 panic 现场落进 rawdump 分区（崩溃排查用）；0=不开"
         required: false
         default: "0"
+      clang_build:
+        description: "钉死 clang banner 构建号（官方=15071444；留空则用此默认）"
+        required: false
+        default: "15071444"
       kernel_commit:
         description: "内核提交（默认就是官方构建用的那个，别乱改）"
         required: false
@@ -80,11 +84,12 @@ jobs:
       # "clang version 22.0.2, based on r596125"，所以优先用它；
       # 万一上游把该目录归档了，就退到列表里次新的，并在日志里大声提示。
       # ---------------------------------------------------------------------
-      - name: 准备工具链 · clang
+      - name: 准备工具链 · clang（按 banner 构建号钉死）
         run: |
           set -e
           mkdir -p toolchain
-          git clone --depth 1 --filter=blob:none --no-checkout "$CLANG_URL" toolchain/clang
+          # 不用 --depth 1：需要该目录的完整提交历史，才能回退到官方构建时的那一版
+          git clone --filter=blob:none --no-checkout "$CLANG_URL" toolchain/clang
           cd toolchain/clang
           git ls-tree --name-only HEAD | grep '^clang-r' | sort -V > /tmp/clang-list.txt
           echo "可用 clang 目录共 $(wc -l < /tmp/clang-list.txt) 个，最新 5 个："
@@ -98,15 +103,41 @@ jobs:
             pick=$(tail -1 /tmp/clang-list.txt)
             echo "::warning::没找到 $CLANG_VER，退到最新的 $pick —— 可能与官方 codegen 不同"
           fi
-          echo "选用: $pick"
-          echo "CLANG_VER=$pick" >> "$GITHUB_ENV"
+          echo "目录: $pick"
+
+          # AOSP 会原地更新同名 clang 目录。官方内核构建于 2026-11-01 02:33 UTC，
+          # banner 是 Android (15071444, ...)；HEAD 上可能已经是更新的构建号。
+          # 遍历该目录的提交历史，找到 banner 里含 (WANT, 的那一版并钉死。
+          WANT="${{ github.event.inputs.clang_build || '15071444' }}"
+          echo "目标构建号: $WANT"
+          git log --format='%H' -- "$pick" > /tmp/cc.txt
+          echo "历史提交数: $(wc -l < /tmp/cc.txt)"
 
           git sparse-checkout init --cone
-          git sparse-checkout set "$pick"
-          git checkout -f HEAD
+          found=""
+          n=0
+          for commit in $(cat /tmp/cc.txt); do
+            n=$((n+1)); [ $n -gt 15 ] && break
+            git sparse-checkout set "$pick/bin" >/dev/null 2>&1 || true
+            git checkout -f "$commit" >/dev/null 2>&1 || continue
+            v=$("$pick/bin/clang" --version 2>/dev/null | grep -m1 '^Android' || true)
+            echo "  [$n] ${commit:0:10}  ${v:-(不可执行/无 banner)}"
+            if [ -n "$v" ] && echo "$v" | grep -q "($WANT,"; then found=$commit; break; fi
+          done
+
+          if [ -n "$found" ]; then
+            git sparse-checkout set "$pick"
+            git checkout -f "$found"
+            echo "已钉死 clang 构建号 $WANT -> $found"
+          else
+            echo "::warning::历史中未找到构建号 $WANT，使用 HEAD（codegen 可能与官方不同）"
+            git sparse-checkout set "$pick"
+            git checkout -f HEAD
+          fi
           test -x "$pick/bin/clang" || { echo "::error::sparse checkout 后没有 $pick/bin/clang"; exit 1; }
-          "./$pick/bin/clang" --version
+          "./$pick/bin/clang" --version | head -2
           du -sh .
+          echo "CLANG_VER=$pick" >> "$GITHUB_ENV"
 
       - name: 准备工具链 · aarch64 / arm 交叉 binutils
         run: |
