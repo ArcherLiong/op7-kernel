@@ -219,6 +219,12 @@ cmd_verify() {
 }
 
 cmd_build() {
+  echo "== 编译命令行诊断（dry-run 抽样，验证 CC/--target 是否真的生效）=="
+  # make -n 不执行只打印；抽 head.o 的编译行，里面应该能看到
+  #   CC=clang --target=aarch64-linux-gnu  是否真正出现在 clang 命令里
+  "${MK[@]}" -n arch/arm64/kernel/assembly.o 2>/dev/null | grep -m1 -E 'clang|gcc' || true
+  "${MK[@]}" -n arch/arm64/kernel/setup.o 2>/dev/null | grep -m1 -E 'clang|gcc' || true
+  echo "== 诊断结束 =="
   echo "== 开始编译 Image（$(nproc) 核，$(free -g | awk '/Mem:/{print $2}')GB 内存）=="
   date +"开始 %H:%M:%S"
   "${MK[@]}" -j"$(nproc)" Image
