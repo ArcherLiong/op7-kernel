@@ -257,5 +257,6 @@ jobs:
             boot-docker.img
             boot-docker.sha256
             kernel.config
+            modules.tar.gz
           if-no-files-found: error
           retention-days: 30

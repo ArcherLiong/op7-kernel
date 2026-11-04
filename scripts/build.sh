@@ -257,7 +257,23 @@ EOF
   echo "== 开始编译 Image（$(nproc) 核，$(free -g | awk '/Mem:/{print $2}')GB 内存）=="
   date +"开始 %H:%M:%S"
   "${MK[@]}" -j"$(nproc)" Image
-  date +"结束 %H:%M:%S"
+  date +"Image 结束 %H:%M:%S"
+
+  echo "== 编译内核模块（WiFi 驱动 qca_cld3_wlan 等，vendor 模块必须与本内核 CRC 匹配）=="
+  "${MK[@]}" -j"$(nproc)" modules
+  date +"modules 结束 %H:%M:%S"
+
+  # 收集所有 .ko 打包
+  mkdir -p "$ROOT/modules"
+  rm -f "$ROOT/modules"/*.ko
+  find "$OUT" -name '*.ko' -exec cp {} "$ROOT/modules/" \;
+  if [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
+    echo "!! 没编译出 qca_cld3_wlan.ko，WiFi 驱动缺失"
+    exit 1
+  fi
+  tar -czf "$ROOT/modules.tar.gz" -C "$ROOT/modules" .
+  echo "  模块清单:"
+  ls -l "$ROOT/modules" | head -10
 
   ls -l "$OUT/arch/arm64/boot/Image"
 
