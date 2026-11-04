@@ -267,8 +267,13 @@ EOF
   mkdir -p "$ROOT/modules"
   rm -f "$ROOT/modules"/*.ko
   find "$OUT" -name '*.ko' -exec cp {} "$ROOT/modules/" \;
+  # qcacld-3.0 在树内原名 wlan.ko；vendor 分区里被重命名为 qca_cld3_wlan.ko
+  if [ -f "$ROOT/modules/wlan.ko" ] && [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
+    cp "$ROOT/modules/wlan.ko" "$ROOT/modules/qca_cld3_wlan.ko"
+    echo "  >> wlan.ko 已复制为 qca_cld3_wlan.ko（对齐 vendor 命名）"
+  fi
   if [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
-    echo "!! 没编译出 qca_cld3_wlan.ko，WiFi 驱动缺失"
+    echo "!! 没编译出 wlan.ko / qca_cld3_wlan.ko，WiFi 驱动缺失"
     exit 1
   fi
   tar -czf "$ROOT/modules.tar.gz" -C "$ROOT/modules" .
