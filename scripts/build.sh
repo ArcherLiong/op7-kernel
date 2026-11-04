@@ -266,13 +266,18 @@ EOF
   # 收集所有 .ko 打包
   mkdir -p "$ROOT/modules"
   rm -f "$ROOT/modules"/*.ko
-  find "$OUT" -name '*.ko' -exec cp {} "$ROOT/modules/" \;
-  # qcacld-3.0 在树内原名 wlan.ko；vendor 分区里被重命名为 qca_cld3_wlan.ko
-  if [ -f "$ROOT/modules/wlan.ko" ] && [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
+  find "$OUT" -name '*.ko' -exec cp {} "$ROOT/modules/" \; 2>/dev/null || true
+  # WiFi 驱动形态检查：
+  #   =y（内建）→ 不应有 wlan.ko，Image 里已含驱动
+  #   =m（模块）→ 必须有 wlan.ko（树内原名），复制为 vendor 命名 qca_cld3_wlan.ko
+  if grep -q '^CONFIG_QCA_CLD_WLAN=y' "$OUT/.config"; then
+    echo ">> WiFi 驱动为内建 (CONFIG_QCA_CLD_WLAN=y)"
+    rm -f "$ROOT/modules/wlan.ko" "$ROOT/modules/qca_cld3_wlan.ko"
+  elif [ -f "$ROOT/modules/wlan.ko" ] && [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
     cp "$ROOT/modules/wlan.ko" "$ROOT/modules/qca_cld3_wlan.ko"
     echo "  >> wlan.ko 已复制为 qca_cld3_wlan.ko（对齐 vendor 命名）"
   fi
-  if [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
+  if ! grep -q '^CONFIG_QCA_CLD_WLAN=y' "$OUT/.config" && [ ! -f "$ROOT/modules/qca_cld3_wlan.ko" ]; then
     echo "!! 没编译出 wlan.ko / qca_cld3_wlan.ko，WiFi 驱动缺失"
     exit 1
   fi

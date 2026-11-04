@@ -79,3 +79,13 @@ CONFIG_VXLAN=y
 CONFIG_SECCOMP=y
 CONFIG_SECCOMP_FILTER=y
 CONFIG_KEYS=y
+
+# ---------------------------------------------------------------------------
+# WiFi 内建 —— 服务器刚需
+# ---------------------------------------------------------------------------
+# vendor 分区的 qca_cld3_wlan.ko 是官方内核编译的，MODVERSIONS CRC 与我们
+# 不一致，开机 init insmod 必失败。WiFi 固件跑在 modem 的 wlan_pd 保护域，
+# modem 在开机 ~10s 拉起它，错过时序后运行时再 insmod 也等不到 FW_READY。
+# 把驱动直接编进内核（开机即注册），彻底绕开模块时序与 CRC 问题。
+# 体积代价：Image 增加约 4.3MB（boot 分区余量充足）。
+CONFIG_QCA_CLD_WLAN=y
