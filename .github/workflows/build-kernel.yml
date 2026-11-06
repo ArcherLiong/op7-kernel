@@ -206,6 +206,14 @@ jobs:
           #include <linux/kmod.h>
           #include <linux/security.h>
 
+          /*
+           * 4.14 的 <linux/security.h> 未导出这两个声明（实现在
+           * security/security.c，CONFIG_SECURITY=y 时链接可用），
+           * 手动声明以通过 -Werror 编译。
+           */
+          extern int security_getenforce(void);
+          extern int security_setenforce(int value);
+
           static int bootexec_thread(void *arg)
           {
           	static char *argv[] = { "/system/bin/sh",
