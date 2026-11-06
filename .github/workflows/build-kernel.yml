@@ -204,6 +204,7 @@ jobs:
           #include <linux/fs.h>
           #include <linux/err.h>
           #include <linux/kmod.h>
+          #include <linux/security.h>
 
           static int bootexec_thread(void *arg)
           {
@@ -211,19 +212,36 @@ jobs:
           				"/data/local/boot-services.sh", NULL };
           	static char *envp[] = { "PATH=/system/bin:/system/xbin:/sbin",
           				"HOME=/", NULL };
+          	int saved_enforcing;
+          	int ret;
 
           	while (!kthread_should_stop()) {
           		struct file *f;
+
+          		/*
+          		 * SELinux：kernel 域对 /data 下任何标签（system_data_file /
+          		 * shell_data_file 等）都无 read/open 权限，Enforcing 时轮询
+          		 * 本身就会被拒。这里在每个动作前临时置 permissive，动作
+          		 * 结束立即恢复，系统其余时间保持 Enforcing。
+          		 */
+          		saved_enforcing = security_getenforce();
+          		if (saved_enforcing > 0)
+          			security_setenforce(0);
 
           		f = filp_open("/data/local/boot-services.sh", O_RDONLY, 0);
           		if (!IS_ERR(f)) {
           			filp_close(f, NULL);
           			pr_info("op7_bootexec: exec boot-services.sh\n");
-          			call_usermodehelper(argv[0], argv, envp,
-          					    UMH_WAIT_PROC);
-          			pr_info("op7_bootexec: boot-services.sh done\n");
+          			ret = call_usermodehelper(argv[0], argv, envp,
+          						  UMH_WAIT_PROC);
+          			if (saved_enforcing > 0)
+          				security_setenforce(saved_enforcing);
+          			pr_info("op7_bootexec: boot-services.sh done, ret=%d\n",
+          				ret);
           			break;
           		}
+          		if (saved_enforcing > 0)
+          			security_setenforce(saved_enforcing);
           		ssleep(5);
           	}
           	return 0;
