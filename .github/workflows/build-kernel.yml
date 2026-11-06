@@ -177,6 +177,91 @@ jobs:
           echo "$BOOT_SHA256  boot-orig.img" | sha256sum -c -
           ls -l boot-orig.img
 
+      # ---------------------------------------------------------------------
+      # 开机自启引导模块：userdebug 固件无 Magisk/init.d/userinit，
+      # 由内核探测 /data/local/boot-services.sh 并以 root 执行一次。
+      # 注入用 heredoc 而非 diff，避免对上游文件上下文的依赖。
+      # ---------------------------------------------------------------------
+      - name: 注入开机自启引导模块
+        run: |
+          set -e
+          cd kernel
+          cat > drivers/misc/op7_bootexec.c <<'CEOF'
+          // SPDX-License-Identifier: GPL-2.0
+          /*
+           * op7_bootexec - OnePlus7 docker 服务器开机自启引导
+           *
+           * userdebug 固件没有任何 init 级开机钩子（无 Magisk、无 init.d）。
+           * 本模块在内核里起一个低频轮询线程：/data 挂载完成后一旦发现
+           * /data/local/boot-services.sh，就以 root 执行一次并退出。
+           * 脚本不存在则静默轮询，对正常启动零影响。
+           */
+          #include <linux/module.h>
+          #include <linux/kernel.h>
+          #include <linux/init.h>
+          #include <linux/kthread.h>
+          #include <linux/delay.h>
+          #include <linux/fs.h>
+          #include <linux/err.h>
+          #include <linux/kmod.h>
+
+          static int bootexec_thread(void *arg)
+          {
+          	static char *argv[] = { "/system/bin/sh",
+          				"/data/local/boot-services.sh", NULL };
+          	static char *envp[] = { "PATH=/system/bin:/system/xbin:/sbin",
+          				"HOME=/", NULL };
+
+          	while (!kthread_should_stop()) {
+          		struct file *f;
+
+          		f = filp_open("/data/local/boot-services.sh", O_RDONLY, 0);
+          		if (!IS_ERR(f)) {
+          			filp_close(f, NULL);
+          			pr_info("op7_bootexec: exec boot-services.sh\n");
+          			call_usermodehelper(argv[0], argv, envp,
+          					    UMH_WAIT_PROC);
+          			pr_info("op7_bootexec: boot-services.sh done\n");
+          			break;
+          		}
+          		ssleep(5);
+          	}
+          	return 0;
+          }
+
+          static int __init op7_bootexec_init(void)
+          {
+          	struct task_struct *t;
+
+          	t = kthread_run(bootexec_thread, NULL, "op7-bootexec");
+          	if (IS_ERR(t)) {
+          		pr_err("op7_bootexec: kthread_run failed\n");
+          		return PTR_ERR(t);
+          	}
+          	pr_info("op7_bootexec: watcher started\n");
+          	return 0;
+          }
+          late_initcall(op7_bootexec_init);
+          CEOF
+          if ! grep -q OP7_BOOTEXEC drivers/misc/Kconfig; then
+          cat >> drivers/misc/Kconfig <<'KEOF'
+
+          config OP7_BOOTEXEC
+          	bool "OnePlus7 boot services exec hook"
+          	default y
+          	help
+          	  Poll for /data/local/boot-services.sh and execute it once with
+          	  root privileges after /data is mounted. Used to auto-start the
+          	  chroot + dockerd server stack on the OnePlus7 docker server.
+          KEOF
+          fi
+          if ! grep -q op7_bootexec drivers/misc/Makefile; then
+          echo 'obj-$(CONFIG_OP7_BOOTEXEC) += op7_bootexec.o' >> drivers/misc/Makefile
+          fi
+          echo "注入完成:"
+          ls -l drivers/misc/op7_bootexec.c
+          grep -n OP7_BOOTEXEC drivers/misc/Kconfig drivers/misc/Makefile
+
       - name: 配置内核
         env:
           LTO: ${{ github.event.inputs.lto || '1' }}
