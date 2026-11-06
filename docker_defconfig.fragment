@@ -99,3 +99,13 @@ CONFIG_QCA_CLD_WLAN=y
 #   - 脚本自身负责等待 sys.boot_completed 与网络
 #   - 脚本缺失时只做 5s 轮询，零开销；每次开机最多执行一次
 CONFIG_OP7_BOOTEXEC=y
+
+# ---------------------------------------------------------------------------
+# 关闭 STATIC_USERMODEHELPER —— 否则所有 call_usermodehelper() 被内核硬拦截
+# ---------------------------------------------------------------------------
+# LineageOS 基线开了 CONFIG_STATIC_USERMODEHELPER=y 且 PATH=""（加固选项，
+# 阻止内核直接拉用户态进程）。它让 op7_bootexec 的 call_usermodehelper
+# 静默返回 0 但什么都不执行（实测 6μs 返回、无 avc、无进程）。
+# 关闭后恢复标准 UMH 行为；Android 上其余 UMH 调用点（/sbin/hotplug 等）
+# 本来就是惰性的，且仍受 SELinux 管控，安全影响可控。
+# CONFIG_STATIC_USERMODEHELPER is not set
