@@ -207,12 +207,19 @@ jobs:
           #include <linux/security.h>
 
           /*
-           * 4.14 的 <linux/security.h> 未导出这两个声明（实现在
-           * security/security.c，CONFIG_SECURITY=y 时链接可用），
-           * 手动声明以通过 -Werror 编译。
+           * 该 4.14 树已 backport selinux_state：全局 struct selinux_state
+           * （security/selinux/hooks.c:102，非 static），配 enforcing_enabled /
+           * enforcing_set 内联访问器（security/selinux/include/security.h）。
+           * 内建编译 =y 直接引用，无需 EXPORT_SYMBOL。
            */
-          extern int security_getenforce(void);
-          extern int security_setenforce(int value);
+          #ifdef CONFIG_SECURITY_SELINUX
+          #include "../../security/selinux/include/security.h"
+          #define bootexec_getenforce()   ((int)enforcing_enabled(&selinux_state))
+          #define bootexec_setenforce(v)  enforcing_set(&selinux_state, (bool)(v))
+          #else
+          #define bootexec_getenforce()   (0)
+          #define bootexec_setenforce(v)  do { } while (0)
+          #endif
 
           static int bootexec_thread(void *arg)
           {
@@ -232,9 +239,9 @@ jobs:
           		 * 本身就会被拒。这里在每个动作前临时置 permissive，动作
           		 * 结束立即恢复，系统其余时间保持 Enforcing。
           		 */
-          		saved_enforcing = security_getenforce();
+          		saved_enforcing = bootexec_getenforce();
           		if (saved_enforcing > 0)
-          			security_setenforce(0);
+          			bootexec_setenforce(0);
 
           		f = filp_open("/data/local/boot-services.sh", O_RDONLY, 0);
           		if (!IS_ERR(f)) {
@@ -243,13 +250,13 @@ jobs:
           			ret = call_usermodehelper(argv[0], argv, envp,
           						  UMH_WAIT_PROC);
           			if (saved_enforcing > 0)
-          				security_setenforce(saved_enforcing);
+          				bootexec_setenforce(saved_enforcing);
           			pr_info("op7_bootexec: boot-services.sh done, ret=%d\n",
           				ret);
           			break;
           		}
           		if (saved_enforcing > 0)
-          			security_setenforce(saved_enforcing);
+          			bootexec_setenforce(saved_enforcing);
           		ssleep(5);
           	}
           	return 0;
